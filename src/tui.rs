@@ -19,7 +19,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::app::{App, Live, Snapshot};
-use crate::store::{AccountId, Config, Store};
+use crate::store::{AccountId, Config, MenuBar, Store};
 use crate::ui::{self, Gauge, Level, Row};
 use crate::usage::Policy;
 use crate::worker::{self, Finished, Job, Note, Switcher};
@@ -61,6 +61,7 @@ enum Setting {
     Cooldown,
     Interval,
     Notify,
+    MenuBar,
 }
 
 /// The actions under an account, opened with ⏎ or →.
@@ -247,6 +248,7 @@ impl Screen {
                 Setting::Cooldown,
                 Setting::Interval,
                 Setting::Notify,
+                Setting::MenuBar,
             ]
             .map(Item::Setting),
         );
@@ -498,6 +500,17 @@ impl Screen {
                 return;
             }
             Setting::Notify => config.notify = flip(config.notify),
+            Setting::MenuBar => {
+                let all = MenuBar::ALL;
+                let at = all.iter().position(|m| *m == config.menubar).unwrap_or(0);
+                // ⏎ goes round; ← and → stop at the ends.
+                let next = match step {
+                    0 => (at + 1) % all.len(),
+                    1 => std::cmp::min(at + 1, all.len() - 1),
+                    _ => at.saturating_sub(1),
+                };
+                config.menubar = all[next];
+            }
         }
         if *config != before
             && let Err(error) = self.store.save_config(config)
@@ -835,6 +848,11 @@ impl Screen {
                 if config.notify { "on" } else { "off" }.to_string(),
                 Style::new(),
             ),
+            Setting::MenuBar => (
+                "Menu bar shows".into(),
+                config.menubar.label().to_string(),
+                Style::new(),
+            ),
         };
         let here = self.cursor.as_ref() == Some(item);
         let value = if here {
@@ -892,6 +910,9 @@ impl Screen {
                 Setting::Interval => "How often the background switcher checks usage.",
                 Setting::Notify => {
                     "A macOS notification each time bytt switches account. ⏎ sends a test one."
+                }
+                Setting::MenuBar => {
+                    "Icon only shows usage when the active account nears its switch point. Hidden: open Bytt again to show it."
                 }
             },
             None => "",

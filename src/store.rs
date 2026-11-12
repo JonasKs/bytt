@@ -225,6 +225,40 @@ pub struct Config {
     pub interval: u64,
     pub cooldown: u64,
     pub notify: bool,
+    pub menubar: MenuBar,
+}
+
+/// What the menu bar app shows in the menu bar.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MenuBar {
+    /// The icon and the active account's usage.
+    Usage,
+    /// The icon; usage only when the active account nears its switch point.
+    #[default]
+    Icon,
+    /// Nothing. Opening the app again shows the icon.
+    Hidden,
+}
+
+impl MenuBar {
+    pub const ALL: [Self; 3] = [Self::Usage, Self::Icon, Self::Hidden];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Usage => "usage",
+            Self::Icon => "icon",
+            Self::Hidden => "hidden",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Usage => "Icon and usage",
+            Self::Icon => "Icon only",
+            Self::Hidden => "Hidden",
+        }
+    }
 }
 
 impl Default for Config {
@@ -238,6 +272,7 @@ impl Default for Config {
             interval: 600,
             cooldown: 300,
             notify: true,
+            menubar: MenuBar::Icon,
         }
     }
 }
@@ -284,7 +319,12 @@ cooldown = {cooldown}
 
 # Show a macOS notification when bytt switches account.
 notify = {notify}
+
+# The menu bar: "usage" (icon and usage), "icon" (usage only when near the switch
+# point) or "hidden" (open Bytt again to show it).
+menubar = "{menubar}"
 "#,
+            menubar = self.menubar.key(),
             auto = self.auto,
             threshold = self.threshold,
             margin = self.margin,
@@ -497,6 +537,7 @@ mod tests {
             interval: 60,
             cooldown: 0,
             notify: false,
+            menubar: MenuBar::Hidden,
         };
         assert_eq!(Config::parse(&edited.render()).unwrap(), edited);
         assert_eq!(Config::parse("").unwrap(), Config::default());

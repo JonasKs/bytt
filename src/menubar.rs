@@ -23,8 +23,8 @@ use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApplication, NSApplicationActivationPolicy,
-    NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu, NSMenuItem, NSStatusBar,
-    NSStatusItem, NSVariableStatusItemLength,
+    NSApplicationDelegate, NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu,
+    NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{
     NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer, NSUserNotification,
@@ -34,7 +34,7 @@ use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
 use crate::app::{App, Live, Snapshot};
 use crate::notify;
-use crate::store::{AccountId, Config, Store};
+use crate::store::{AccountId, Config, MenuBar, Store};
 use crate::ui::{self, Level};
 use crate::worker::{self, Finished, Job, Note};
 
@@ -85,11 +85,12 @@ pub fn run(app: App) {
             dirty: true,
         },
     );
-    // The center holds its delegate weakly; the handler lives as long as the app.
+    // Both hold their delegate weakly; the handler lives as long as the app.
     unsafe {
         NSUserNotificationCenter::defaultUserNotificationCenter()
             .setDelegate(Some(ProtocolObject::from_ref(&*handler)));
     }
+    application.setDelegate(Some(ProtocolObject::from_ref(&*handler)));
     handler.send(Job::Refresh, Some("Reading usage"));
     first_launch_login_item();
 
@@ -126,6 +127,7 @@ enum Action {
     TestNotification,
     OpenConfig,
     LoginItem(bool),
+    MenuBar(MenuBar),
     Refresh,
     Quit,
 }
@@ -183,6 +185,18 @@ define_class!(
             _center: &NSUserNotificationCenter,
             _notification: &NSUserNotification,
         ) -> bool {
+            true
+        }
+    }
+
+    // Opening Bytt while it runs (Spotlight, Applications) brings a hidden icon back.
+    unsafe impl NSApplicationDelegate for Handler {
+        #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+        fn should_handle_reopen(&self, _application: &NSApplication, _visible: bool) -> bool {
+            if self.ivars().borrow().config.menubar == MenuBar::Hidden {
+                self.configure(|c| c.menubar = MenuBar::Icon);
+                self.tick_now();
+            }
             true
         }
     }
@@ -350,6 +364,19 @@ impl Handler {
                 }
                 self.ivars().borrow_mut().dirty = true;
             }
+            Action::MenuBar(MenuBar::Hidden) => {
+                let choice = alert(
+                    mtm,
+                    "Hide bytt from the menu bar?",
+                    "bytt keeps running and switching. To show it again, open Bytt from \
+                     Spotlight or Applications.",
+                    &["Cancel", "Hide"],
+                );
+                if choice == 1 {
+                    self.configure(|c| c.menubar = MenuBar::Hidden);
+                }
+            }
+            Action::MenuBar(shown) => self.configure(|c| c.menubar = shown),
             Action::Refresh => self.send(Job::Refresh, Some("Reading usage")),
             Action::Quit => NSApplication::sharedApplication(mtm).terminate(None),
         }
@@ -478,6 +505,8 @@ impl Handler {
                         .map_or_default(|r| ui::gauges(r, &policy, snapshot.now));
                     if row.active
                         && let Some(top) = gauges.iter().max_by(|a, b| a.pct.total_cmp(&b.pct))
+                        && (config.menubar == MenuBar::Usage
+                            || matches!(top.level, Level::Near | Level::Over))
                     {
                         button_title = format!(" {:.0}%", top.pct);
                     }
@@ -582,9 +611,24 @@ impl Handler {
         if let Some(on) = login_item() {
             menu.item(root, "Open at Login", Some(Action::LoginItem(!on)), on);
         }
+        let shown = menu.submenu(root, "Menu Bar");
+        for choice in MenuBar::ALL {
+            let title = match choice {
+                MenuBar::Usage => "Icon and Usage",
+                MenuBar::Icon => "Icon Only, Usage When Near the Limit",
+                MenuBar::Hidden => "Hidden…",
+            };
+            menu.item(
+                &shown,
+                title,
+                Some(Action::MenuBar(choice)),
+                config.menubar == choice,
+            );
+        }
         menu.item(root, "Refresh", Some(Action::Refresh), false);
         menu.item(root, "Quit bytt", Some(Action::Quit), false);
 
+        state.item.setVisible(config.menubar != MenuBar::Hidden);
         if let Some(button) = state.item.button(mtm) {
             button.setTitle(&NSString::from_str(&button_title));
         }

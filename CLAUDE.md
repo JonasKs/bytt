@@ -97,6 +97,8 @@ re-open the tap PR.
   identifier, and a running app's own notifications only show because `menubar.rs` is
   the center's delegate (`shouldPresentNotification` → true). `bytt notify` (hidden)
   sends a test one.
+- **Hidden menu bar icon** comes back through `applicationShouldHandleReopen`: `open`
+  on the running app sends a reopen event to it rather than starting a second copy.
 - **Open at Login** appears only when run from /Applications (`just install`). Before
   its first registration the app's SMAppService status is `NotFound`, not
   `NotRegistered`; both mean "off".

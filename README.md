@@ -5,8 +5,8 @@ by hand or automatically before the one you're on hits its usage limit.
 
 Made for me, by agents. Feel free to use.
 
-- The menu bar shows the active account's usage. Open it for every account's 5-hour
-  and weekly usage; click one to switch. Running Claude Code sessions follow within
+- A small ⇆ in the menu bar, with the active account's usage once it nears its limit.
+  Open it for every account's 5-hour and weekly usage; click one to switch. Running Claude Code sessions follow within
   about 30 seconds; no restart, no `/login`.
 - Turn on Auto-Switch and bytt moves you to the account with the most room left when
   the active one reaches 90%.
@@ -44,6 +44,7 @@ Account…** again. Don't `/logout` first: that revokes the login bytt just save
 ├─ Auto-Switch                         on/off
 ├─ Auto-Switch Settings               ▸
 ├─ Open at Login
+├─ Menu Bar                          ▸  icon and usage, icon only, hidden
 ├─ Refresh
 └─ Quit bytt
 ```
@@ -72,6 +73,13 @@ switch it waits five minutes before switching again.
 | Notification on switch | on | With a test button |
 
 An account's submenu can leave it out of automatic switching.
+
+## Keep the menu bar tidy
+
+**Menu Bar** chooses what bytt shows up there: the icon and usage, the icon only (the
+default, with usage added when the active account nears its switch point), or nothing.
+Hidden, bytt keeps running and switching; open Bytt from Spotlight or Applications to
+bring the icon back.
 
 ## In a terminal
 
@@ -102,6 +110,7 @@ margin = 10              # only switch to accounts at least this far below those
 interval = 600           # seconds between checks
 cooldown = 300           # seconds to wait between switches
 notify = true            # macOS notification on switch
+menubar = "icon"         # "usage", "icon" or "hidden"
 ```
 
 ## When a login dies
