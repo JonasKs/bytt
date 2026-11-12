@@ -28,10 +28,8 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
         with:
           config-file: ".github/release-please-config.json"
           manifest-file: ".github/.release-please-manifest.json"
@@ -57,7 +55,7 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
 
@@ -141,7 +139,7 @@ jobs:
         run: gh release download "$TAG" --pattern checksums.txt --repo ${{ github.repository }} --dir /tmp
 
       - name: Checkout tap repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: jonasks/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
