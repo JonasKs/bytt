@@ -284,8 +284,7 @@ impl Paint {
         let reset = gauge
             .reset
             .as_ref()
-            .map(|reset| self.wrap("2", &format!(" · {reset}")))
-            .unwrap_or_default();
+            .map_or_default(|reset| self.wrap("2", &format!(" · {reset}")));
         format!(
             "{} {} {}{reset}",
             gauge.label,
@@ -327,8 +326,7 @@ pub fn table(snapshot: &Snapshot, policy: &Policy) -> String {
 
         let mut cells: Vec<String> = row
             .usage
-            .map(|reading| gauges(reading, policy, snapshot.now))
-            .unwrap_or_default()
+            .map_or_default(|reading| gauges(reading, policy, snapshot.now))
             .iter()
             .map(|gauge| paint.gauge(gauge))
             .collect();

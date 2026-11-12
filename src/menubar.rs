@@ -475,8 +475,7 @@ impl Handler {
                 for row in ui::rows(snapshot) {
                     let gauges = row
                         .usage
-                        .map(|r| ui::gauges(r, &policy, snapshot.now))
-                        .unwrap_or_default();
+                        .map_or_default(|r| ui::gauges(r, &policy, snapshot.now));
                     if row.active
                         && let Some(top) = gauges.iter().max_by(|a, b| a.pct.total_cmp(&b.pct))
                     {
@@ -491,14 +490,13 @@ impl Handler {
                         let reset = gauge
                             .resets_at
                             .filter(|_| gauge.reset.is_some())
-                            .map(|at| {
+                            .map_or_default(|at| {
                                 format!(
                                     " · resets in {}, {}",
                                     gauge.reset.as_deref().unwrap_or_default(),
                                     at.with_timezone(&Local).format("%a %H:%M")
                                 )
-                            })
-                            .unwrap_or_default();
+                            });
                         menu.info(
                             &sub,
                             &format!(
@@ -534,7 +532,7 @@ impl Handler {
 
                     // One line under the account, so usage shows without opening it.
                     let summary = if gauges.is_empty() {
-                        row.notice().map(|(text, _)| text).unwrap_or_default()
+                        row.notice().map_or_default(|(text, _)| text)
                     } else {
                         let worst = gauges
                             .iter()

@@ -767,7 +767,7 @@ mod tests {
         world.login("anna", "anna-1", "anna-r1");
         world.knows("anna-1", "bob");
         assert!(world.app.add().is_err());
-        assert!(world.app.store.registry().unwrap().accounts.is_empty());
+        assert_eq!(world.app.store.registry().unwrap().accounts, []);
     }
 
     #[test]
@@ -918,7 +918,7 @@ mod tests {
         assert_eq!(candidates[0].1.five_hour.as_ref().unwrap().pct, 5.0);
 
         world.app.collect(&scope).unwrap();
-        assert!(world.calls().is_empty());
+        assert_eq!(world.calls(), Vec::<String>::new());
     }
 
     #[test]

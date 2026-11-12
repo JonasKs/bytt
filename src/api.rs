@@ -162,7 +162,7 @@ impl Api for Http {
         } else {
             Err(RefreshError::Transient(format!(
                 "http {status}{}",
-                verdict.map(|v| format!(" ({v})")).unwrap_or_default()
+                verdict.map_or_default(|v| format!(" ({v})"))
             )))
         }
     }
