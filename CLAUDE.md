@@ -97,8 +97,9 @@ re-open the tap PR.
   identifier, and a running app's own notifications only show because `menubar.rs` is
   the center's delegate (`shouldPresentNotification` → true). `bytt notify` (hidden)
   sends a test one.
-- **Open at Login** appears only once SMAppService can see the bundle, i.e. when run
-  from /Applications (`just install`).
+- **Open at Login** appears only when run from /Applications (`just install`). Before
+  its first registration the app's SMAppService status is `NotFound`, not
+  `NotRegistered`; both mean "off".
 - **Two identical Developer ID identities** in the login keychain make `codesign -s
   "Developer ID Application: …"` ambiguous; `just bundle` signs by hash.
 - **Testing the TUI headlessly:** `tmux new-session -d -s t -x 130 -y 18 ./target/debug/bytt`,

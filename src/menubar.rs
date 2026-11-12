@@ -827,11 +827,15 @@ fn alert(mtm: MainThreadMarker, title: &str, text: &str, buttons: &[&str]) -> us
     buttons.len().saturating_sub(1).saturating_sub(pressed)
 }
 
-/// Whether bytt opens at login; `None` outside a bundle, where it cannot.
+/// Whether bytt opens at login; `None` unless it runs from /Applications.
 fn login_item() -> Option<bool> {
+    if !std::env::current_exe().is_ok_and(|p| p.starts_with("/Applications")) {
+        return None;
+    }
     match unsafe { SMAppService::mainAppService().status() } {
         SMAppServiceStatus::Enabled | SMAppServiceStatus::RequiresApproval => Some(true),
-        SMAppServiceStatus::NotRegistered => Some(false),
+        // A never-registered app reports NotFound rather than NotRegistered.
+        SMAppServiceStatus::NotRegistered | SMAppServiceStatus::NotFound => Some(false),
         _ => None,
     }
 }
@@ -851,12 +855,11 @@ fn set_login_item(on: bool) -> Result<(), String> {
 /// The first time the installed app runs, open it at login too. Turning that off in
 /// the menu sticks, because the marker stays.
 fn first_launch_login_item() {
-    let installed = std::env::current_exe().is_ok_and(|p| p.starts_with("/Applications"));
     let Some(home) = std::env::home_dir() else {
         return;
     };
     let marker = home.join(".bytt").join("login-item");
-    if installed && !marker.exists() && login_item() == Some(false) {
+    if !marker.exists() && login_item() == Some(false) {
         let _ = set_login_item(true);
         let _ = fs::write(marker, "");
     }
