@@ -1,0 +1,43 @@
+[package]
+name = "bytt"
+version = "0.0.0"
+edition = "2024"
+description = "Keep several Claude Code accounts and swap between them before you hit a limit"
+license = "MIT"
+repository = "https://github.com/jonasks/bytt"
+publish = false
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+ratatui = "0.30"
+toml = "1"
+ureq = { version = "3", features = ["json"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSUserNotification", "NSString", "NSDate", "NSBundle", "NSTimer", "NSData", "NSObject", "NSThread", "NSError", "NSGeometry", "NSRunLoop", "NSObjCRuntime"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem", "NSImage", "NSAlert", "NSRunningApplication", "NSCell", "NSButtonCell", "NSActionCell", "objc2-core-foundation"] }
+objc2-service-management = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+struct_field_names = "allow"
+single_match_else = "allow"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

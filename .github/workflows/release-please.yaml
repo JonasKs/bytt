@@ -1,0 +1,210 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  # Re-publish the cask for an existing release, e.g. after fixing the tap step.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish to the tap (e.g. v0.1.0)"
+        required: true
+      signed:
+        description: "The release is Developer ID signed and notarized"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+        with:
+          config-file: ".github/release-please-config.json"
+          manifest-file: ".github/.release-please-manifest.json"
+
+  # Bytt.app for Apple Silicon, zipped, uploaded to the release.
+  #
+  # With the APPLE_* secrets present, the app is signed with the Developer ID
+  # certificate (hardened runtime), notarized through the App Store Connect API and
+  # stapled, so Gatekeeper accepts it. Without them it is ad-hoc signed and the cask
+  # warns about quarantine.
+  build:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: macos-latest
+    outputs:
+      signed: ${{ steps.mode.outputs.signed }}
+    env:
+      VERSION: ${{ needs.release-please.outputs.version }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+
+      - name: Decide signing mode
+        id: mode
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] \
+            && [ -n "$APPLE_SIGNING_IDENTITY" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_ISSUER" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Signing with Developer ID and notarizing."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::APPLE_* secrets missing: shipping an ad-hoc signed, unnotarized app."
+          fi
+
+      - name: Import the signing certificate
+        if: steps.mode.outputs.signed == 'true'
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+      - name: Build and bundle Bytt.app (arm64)
+        run: |
+          cargo build --release --locked
+          if [ "${{ steps.mode.outputs.signed }}" = "true" ]; then
+            export SIGN_IDENTITY="$APPLE_SIGNING_IDENTITY"
+          fi
+          macos/bundle.sh target/release/bytt target
+
+      - name: Notarize and staple
+        if: steps.mode.outputs.signed == 'true'
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          printf '%s\n' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
+          ditto -c -k --keepParent target/Bytt.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --wait \
+            --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER"
+          xcrun stapler staple target/Bytt.app
+
+      - name: Verify signature
+        run: |
+          APP=target/Bytt.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "Authority|Signature|TeamIdentifier" || true
+          if [ "${{ steps.mode.outputs.signed }}" = "true" ]; then
+            spctl --assess --type execute --verbose=2 "$APP"
+          fi
+
+      - name: Zip
+        run: |
+          ditto -c -k --keepParent target/Bytt.app "Bytt-${VERSION}-aarch64.zip"
+          shasum -a 256 "Bytt-${VERSION}-aarch64.zip" > checksums.txt
+          cat checksums.txt
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "Bytt-${VERSION}-aarch64.zip" checksums.txt --repo ${{ github.repository }}
+
+  # Opens a PR on jonasks/homebrew-tap that rewrites Casks/bytt.rb, using the
+  # HOMEBREW_TAP_TOKEN secret (fine-grained PAT: Contents + Pull requests, read/write).
+  update-homebrew:
+    needs: [release-please, build]
+    if: ${{ !cancelled() && (needs.release-please.outputs.release_created || inputs.tag) }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+      SIGNED: ${{ needs.build.outputs.signed || inputs.signed }}
+    steps:
+      - name: Download checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$TAG" --pattern checksums.txt --repo ${{ github.repository }} --dir /tmp
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: jonasks/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update cask
+        run: |
+          VERSION="${TAG#v}"
+          SHA=$(awk '{print $1}' /tmp/checksums.txt)
+          if [ "$SIGNED" = "true" ]; then
+            QUARANTINE_NOTE=""
+          else
+            QUARANTINE_NOTE="bytt is ad-hoc signed, not notarized. Install with
+                  brew install --cask --no-quarantine bytt
+                or, if Gatekeeper already blocked it:
+                  xattr -dr com.apple.quarantine /Applications/Bytt.app
+
+                "
+          fi
+          mkdir -p Casks
+          cat > Casks/bytt.rb << CASK
+          cask "bytt" do
+            version "$VERSION"
+            sha256 "$SHA"
+
+            url "https://github.com/jonasks/bytt/releases/download/v#{version}/Bytt-#{version}-aarch64.zip"
+            name "bytt"
+            desc "Menu bar switcher for several Claude Code accounts"
+            homepage "https://github.com/jonasks/bytt"
+
+            depends_on macos: :sonoma
+            depends_on arch: :arm64
+
+            app "Bytt.app"
+            binary "#{appdir}/Bytt.app/Contents/MacOS/bytt"
+
+            # brew upgrade quits bytt through this and reopens it afterwards.
+            uninstall quit: "com.jonas.bytt"
+
+            zap trash: "~/.bytt"
+
+            caveats do
+              <<~EOS
+                ${QUARANTINE_NOTE}Open bytt from Applications once; it lives in the menu bar and
+                opens at login from then on.
+              EOS
+            end
+          end
+          CASK
+          sed -i 's/^          //' Casks/bytt.rb
+          cat Casks/bytt.rb
+
+      - name: Create PR in tap repo
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          BRANCH="bytt-$TAG"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add Casks/bytt.rb
+          git commit -m "feat: update bytt to $TAG"
+          git push origin "$BRANCH"
+          gh pr create --repo jonasks/homebrew-tap \
+            --title "Update bytt to $TAG" \
+            --body "Automated cask update from [bytt release](https://github.com/jonasks/bytt/releases/tag/$TAG)." \
+            --head "$BRANCH"

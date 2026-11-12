@@ -1,0 +1,28 @@
+# bytt only ships for Apple Silicon macOS.
+[graph]
+targets = ["aarch64-apple-darwin"]
+
+[advisories]
+ignore = []
+version = 2
+yanked = "warn"
+
+[sources]
+unknown-git = "deny"
+unknown-registry = "deny"
+
+[licenses]
+allow = [
+  "Unicode-3.0",
+  "MIT",
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+version = 2
+
+[licenses.private]
+ignore = true
