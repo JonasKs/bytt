@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JonasKs/bytt/compare/v0.2.0...v0.3.0) (2026-11-13)
+
+
+### Features
+
+* show usage as a plain percentage, readable menus, working notifications ([5fb81bd](https://github.com/JonasKs/bytt/commit/5fb81bdf186cc456bfa3dd7e1ca416b84a285839))
+
 ## [0.2.0](https://github.com/JonasKs/bytt/compare/v0.1.0...v0.2.0) (2026-11-12)
 
 
