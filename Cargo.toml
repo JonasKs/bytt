@@ -1,6 +1,6 @@
 [package]
 name = "bytt"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 description = "Keep several Claude Code accounts and swap between them before you hit a limit"
 license = "MIT"
