@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JonasKs/bytt/compare/v0.3.1...v0.4.0) (2026-11-13)
+
+
+### Features
+
+* usage bars per account and an orange badge on the menu bar number ([5fef9c2](https://github.com/JonasKs/bytt/commit/5fef9c26e53fea33dc15052101004c847e0ca3e4))
+
 ## [0.3.1](https://github.com/JonasKs/bytt/compare/v0.3.0...v0.3.1) (2026-11-13)
 
 
