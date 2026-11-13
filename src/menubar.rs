@@ -19,13 +19,18 @@ use block2::DynBlock;
 use chrono::Local;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2::{
+    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
+};
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApplication, NSApplicationActivationPolicy,
-    NSApplicationDelegate, NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu,
-    NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSApplicationDelegate, NSColor, NSControlStateValueOff, NSControlStateValueOn, NSFont,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSImage, NSMenu, NSMenuItem, NSStatusBar,
+    NSStatusItem, NSVariableStatusItemLength,
 };
-use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer};
+use objc2_foundation::{
+    NSAttributedString, NSDictionary, NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer,
+};
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 use objc2_user_notifications::{
     UNNotification, UNNotificationPresentationOptions, UNUserNotificationCenter,
@@ -805,10 +810,30 @@ impl Builder<'_> {
         item
     }
 
-    /// A line of text that does nothing when clicked. Left enabled: `AppKit` greys out
-    /// disabled items, which made these hard to read.
+    /// A line of text that does nothing when clicked. Disabled, so it never highlights,
+    /// but `AppKit` greys out a disabled item's plain title; an attributed title keeps
+    /// the color it is given, so these read like any other item.
     fn info(&mut self, menu: &NSMenu, title: &str) -> Retained<NSMenuItem> {
-        self.item(menu, title, None, false)
+        let item = self.item(menu, title, None, false);
+        let (keys, color, font) = unsafe {
+            (
+                [NSForegroundColorAttributeName, NSFontAttributeName],
+                NSColor::labelColor(),
+                NSFont::menuFontOfSize(0.0),
+            )
+        };
+        let values: [&AnyObject; 2] = [&color, &font];
+        let attributes = NSDictionary::from_slices(&keys, &values);
+        let text = unsafe {
+            NSAttributedString::initWithString_attributes(
+                NSAttributedString::alloc(),
+                &NSString::from_str(title),
+                Some(&attributes),
+            )
+        };
+        item.setAttributedTitle(Some(&text));
+        item.setEnabled(false);
+        item
     }
 
     fn submenu(&mut self, menu: &NSMenu, title: &str) -> Retained<NSMenu> {

@@ -17,8 +17,8 @@ ratatui = "0.30"
 toml = "1"
 ureq = { version = "3", features = ["json"] }
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDate", "NSBundle", "NSTimer", "NSData", "NSObject", "NSThread", "NSError", "NSGeometry", "NSRunLoop", "NSObjCRuntime"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem", "NSImage", "NSAlert", "NSRunningApplication", "NSCell", "NSButtonCell", "NSActionCell", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDate", "NSBundle", "NSTimer", "NSData", "NSObject", "NSThread", "NSError", "NSGeometry", "NSRunLoop", "NSObjCRuntime", "NSAttributedString", "NSDictionary"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem", "NSImage", "NSAlert", "NSRunningApplication", "NSCell", "NSButtonCell", "NSActionCell", "NSColor", "NSFont", "NSAttributedString", "objc2-core-foundation"] }
 objc2-service-management = "0.3"
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "UNUserNotificationCenter", "UNNotificationRequest", "UNNotificationContent", "UNNotificationTrigger", "UNNotification"] }
 block2 = "0.6"
