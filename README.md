@@ -31,19 +31,20 @@ Account…** again. Don't `/logout` first: that revokes the login bytt just save
 ## The menu
 
 ```
-20%
-├─ Auto-switch on · switches at 90%
+20%  (with small orange arrows over the %)
 ├─ Now: on anna@example.com · 5h 83%, switches at 90%
 ├─ Next up: bob@example.com · 7d 9%
 ├─ ✓ anna@example.com                 ▸  usage, reset times, switch, include, remove
-│      🟡 5h 83%  ·  7d 18%
+│      ━━━━━━━━━━   83%  5h     (orange: near the switch point)
+│      ━━━━━━━━━━   18%  7d
 ├─   bob@example.com                  ▸
-│      🟢 7d 9%
+│      ━━━━━━━━━━    9%  7d
 ├─ Add Account…
-├─ Auto-Switch                         on/off
+├─ Auto-Switch at 90%                  on/off
 ├─ Auto-Switch Settings               ▸
 ├─ Open at Login
 ├─ Menu Bar                          ▸  usage, icon, hidden
+├─ Last check 20:13: …
 ├─ Refresh
 └─ Quit bytt
 ```

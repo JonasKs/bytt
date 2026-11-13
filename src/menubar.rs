@@ -15,21 +15,23 @@ use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant, SystemTime};
 
-use block2::DynBlock;
+use block2::{DynBlock, RcBlock};
 use chrono::Local;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
+use objc2::runtime::{AnyObject, Bool, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
 };
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApplication, NSApplicationActivationPolicy,
-    NSApplicationDelegate, NSColor, NSControlStateValueOff, NSControlStateValueOn, NSFont,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSImage, NSMenu, NSMenuItem, NSStatusBar,
-    NSStatusItem, NSVariableStatusItemLength,
+    NSApplicationDelegate, NSAttributedStringNSStringDrawing, NSColor, NSControlStateValueOff,
+    NSControlStateValueOn, NSFont, NSFontAttributeName, NSFontWeightBold, NSFontWeightRegular,
+    NSForegroundColorAttributeName, NSImage, NSImageSymbolConfiguration, NSMenu, NSMenuItem,
+    NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{
-    NSAttributedString, NSDictionary, NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer,
+    NSArray, NSAttributedString, NSDictionary, NSMutableAttributedString, NSPoint, NSRect,
+    NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer,
 };
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 use objc2_user_notifications::{
@@ -545,23 +547,15 @@ impl Handler {
                     menu.item(&sub, "Remove…", Some(Action::Remove(row.id.clone())), false);
                     account.setSubmenu(Some(&sub));
 
-                    // One line under the account, so usage shows without opening it.
-                    let summary = if gauges.is_empty() {
-                        row.notice().map_or_default(|(text, _)| text)
-                    } else {
-                        let worst = gauges
-                            .iter()
-                            .map(|g| g.level)
-                            .max_by_key(|l| severity(*l))
-                            .unwrap_or(Level::Ok);
-                        let parts: Vec<String> = gauges
-                            .iter()
-                            .map(|g| format!("{} {}", g.label, g.figure().trim()))
-                            .collect();
-                        format!("{} {}", dot(worst), parts.join("  ·  "))
-                    };
-                    let line = menu.info(root, &summary);
-                    line.setIndentationLevel(1);
+                    // A bar per window under the account, so usage shows without
+                    // opening it.
+                    if gauges.is_empty() {
+                        let notice = row.notice().map_or_default(|(text, _)| text);
+                        menu.info(root, &notice).setIndentationLevel(1);
+                    }
+                    for gauge in &gauges {
+                        menu.gauge(root, gauge).setIndentationLevel(1);
+                    }
                 }
                 if let Some(notice) = ui::live_notice(&snapshot.live) {
                     menu.info(root, notice);
@@ -613,25 +607,75 @@ impl Handler {
 
         state.item.setVisible(config.menubar != MenuBar::Hidden);
         if let Some(button) = state.item.button(mtm) {
-            // "Usage" is the number alone; the icon stands in until there is one.
-            let icon = config.menubar == MenuBar::Icon || button_title.is_empty();
-            let image = icon
-                .then(|| {
-                    NSImage::imageWithSystemSymbolName_accessibilityDescription(
-                        &NSString::from_str("arrow.left.arrow.right"),
-                        Some(&NSString::from_str("bytt")),
-                    )
-                })
-                .flatten();
-            button.setImage(image.as_deref());
-            let title = if icon && !button_title.is_empty() {
-                format!(" {button_title}")
+            // "Usage" is the number with a small orange badge; the plain icon stands in
+            // until there is a number.
+            if config.menubar == MenuBar::Usage && !button_title.is_empty() {
+                button.setImage(Some(&usage_image(&button_title)));
+                button.setTitle(&NSString::from_str(""));
             } else {
-                button_title
-            };
-            button.setTitle(&NSString::from_str(&title));
+                let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+                    &NSString::from_str("arrow.left.arrow.right"),
+                    Some(&NSString::from_str("bytt")),
+                );
+                button.setImage(image.as_deref());
+                let title = if button_title.is_empty() {
+                    button_title
+                } else {
+                    format!(" {button_title}")
+                };
+                button.setTitle(&NSString::from_str(&title));
+            }
         }
     }
+}
+
+/// Claude's orange, for the badge.
+const ORANGE: (f64, f64, f64) = (217.0 / 255.0, 119.0 / 255.0, 87.0 / 255.0);
+
+/// `text` (the usage) with small orange arrows tucked over its top-right corner, the
+/// way Teams badges its icon. Drawn at display time, so the text follows the menu
+/// bar's light or dark appearance.
+fn usage_image(text: &str) -> Retained<NSImage> {
+    let string = attributed(
+        &[(text, &NSColor::labelColor())],
+        &NSFont::menuBarFontOfSize(0.0),
+    );
+    let orange = NSColor::colorWithSRGBRed_green_blue_alpha(ORANGE.0, ORANGE.1, ORANGE.2, 1.0);
+    let config = NSImageSymbolConfiguration::configurationWithPointSize_weight(8.0, unsafe {
+        NSFontWeightBold
+    })
+    .configurationByApplyingConfiguration(
+        &NSImageSymbolConfiguration::configurationWithPaletteColors(&NSArray::from_slice(&[
+            &*orange,
+        ])),
+    );
+    let badge = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+        &NSString::from_str("arrow.left.arrow.right"),
+        None,
+    )
+    .and_then(|image| image.imageWithSymbolConfiguration(&config));
+
+    let text_size = string.size();
+    let badge_size = badge.as_ref().map_or(NSSize::new(0.0, 0.0), |b| b.size());
+    let height = NSStatusBar::systemStatusBar().thickness();
+    // The badge overlaps the text by a little less than half its width.
+    let overlap = badge_size.width * 0.4;
+    let size = NSSize::new(text_size.width + badge_size.width - overlap, height);
+    let draw = RcBlock::new(move |_rect: NSRect| -> Bool {
+        let text_y = ((height - text_size.height) / 2.0 - 1.5).max(0.0);
+        string.drawAtPoint(NSPoint::new(0.0, text_y));
+        if let Some(badge) = &badge {
+            badge.drawInRect(NSRect::new(
+                NSPoint::new(text_size.width - overlap, height - badge_size.height - 2.0),
+                badge_size,
+            ));
+        }
+        Bool::YES
+    });
+    let image = NSImage::imageWithSize_flipped_drawingHandler(size, false, &draw);
+    image.setTemplate(false);
+    image.setAccessibilityDescription(Some(&NSString::from_str(&format!("bytt {text}"))));
+    image
 }
 
 /// Auto-Switch on/off and its settings submenu.
@@ -814,26 +858,48 @@ impl Builder<'_> {
     /// but `AppKit` greys out a disabled item's plain title; an attributed title keeps
     /// the color it is given, so these read like any other item.
     fn info(&mut self, menu: &NSMenu, title: &str) -> Retained<NSMenuItem> {
-        let item = self.item(menu, title, None, false);
-        let (keys, color, font) = unsafe {
-            (
-                [NSForegroundColorAttributeName, NSFontAttributeName],
-                NSColor::labelColor(),
-                NSFont::menuFontOfSize(0.0),
-            )
-        };
-        let values: [&AnyObject; 2] = [&color, &font];
-        let attributes = NSDictionary::from_slices(&keys, &values);
-        let text = unsafe {
-            NSAttributedString::initWithString_attributes(
-                NSAttributedString::alloc(),
-                &NSString::from_str(title),
-                Some(&attributes),
-            )
-        };
-        item.setAttributedTitle(Some(&text));
+        let font = NSFont::menuFontOfSize(0.0);
+        self.styled(menu, &[(title, &NSColor::labelColor())], &font)
+    }
+
+    /// An info line made of differently colored pieces.
+    fn styled(
+        &mut self,
+        menu: &NSMenu,
+        parts: &[(&str, &NSColor)],
+        font: &NSFont,
+    ) -> Retained<NSMenuItem> {
+        let title: String = parts.iter().map(|(text, _)| *text).collect();
+        let item = self.item(menu, &title, None, false);
+        item.setAttributedTitle(Some(&attributed(parts, font)));
         item.setEnabled(false);
         item
+    }
+
+    /// One usage window as a line: a bar colored by how near it is to the switch
+    /// point, then the figure and the window's name. Bars first, so they line up.
+    fn gauge(&mut self, menu: &NSMenu, gauge: &ui::Gauge) -> Retained<NSMenuItem> {
+        let size = NSFont::menuFontOfSize(0.0).pointSize();
+        let font =
+            unsafe { NSFont::monospacedDigitSystemFontOfSize_weight(size, NSFontWeightRegular) };
+        let color = match gauge.level {
+            Level::Ok => NSColor::systemGreenColor(),
+            Level::Near => NSColor::systemOrangeColor(),
+            Level::Over => NSColor::systemRedColor(),
+            Level::Dim => NSColor::secondaryLabelColor(),
+        };
+        let filled = "━".repeat(gauge.filled);
+        let empty = "━".repeat(10 - gauge.filled);
+        let text = format!("  {}  {}", gauge.figure(), gauge.label);
+        self.styled(
+            menu,
+            &[
+                (&filled, &color),
+                (&empty, &NSColor::tertiaryLabelColor()),
+                (&text, &NSColor::labelColor()),
+            ],
+            &font,
+        )
     }
 
     fn submenu(&mut self, menu: &NSMenu, title: &str) -> Retained<NSMenu> {
@@ -853,21 +919,31 @@ fn join(label: &str, says: &ui::Says) -> String {
     }
 }
 
+/// `parts` joined, each in its own color, all in `font`.
+fn attributed(parts: &[(&str, &NSColor)], font: &NSFont) -> Retained<NSAttributedString> {
+    let whole = NSMutableAttributedString::new();
+    for (text, color) in parts {
+        let keys = unsafe { [NSForegroundColorAttributeName, NSFontAttributeName] };
+        let values: [&AnyObject; 2] = [*color, font];
+        let attributes = NSDictionary::from_slices(&keys, &values);
+        let part = unsafe {
+            NSAttributedString::initWithString_attributes(
+                NSAttributedString::alloc(),
+                &NSString::from_str(text),
+                Some(&attributes),
+            )
+        };
+        whole.appendAttributedString(&part);
+    }
+    Retained::into_super(whole)
+}
+
 fn dot(level: Level) -> &'static str {
     match level {
         Level::Ok => "🟢",
         Level::Near => "🟡",
         Level::Over => "🔴",
         Level::Dim => "⚪️",
-    }
-}
-
-fn severity(level: Level) -> u8 {
-    match level {
-        Level::Dim => 0,
-        Level::Ok => 1,
-        Level::Near => 2,
-        Level::Over => 3,
     }
 }
 
