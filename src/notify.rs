@@ -1,29 +1,47 @@
 //! macOS notifications.
 //!
-//! Inside `Bytt.app` (how Homebrew installs it) bytt posts them itself, so they carry
-//! its name and icon. A bare binary, like a `cargo run`, has no bundle to post as and
-//! asks `osascript` instead, which macOS files under Script Editor.
+//! Inside `Bytt.app` (how Homebrew installs it, the `bytt` on the PATH included) bytt
+//! posts them through `UserNotifications`, so they carry its name and icon. macOS asks
+//! once whether to allow them. A bare binary, like a `cargo run`, has no bundle to
+//! post as and asks `osascript` instead, which macOS files under Script Editor.
 //!
-//! `NSUserNotification` is deprecated in favour of `UserNotifications`, which needs an
-//! authorization round-trip and a run loop; this one still works for a signed bundle.
-#![allow(deprecated)]
-
+//! The older `NSUserNotification` never asks for permission, and current macOS drops
+//! its notifications without a word.
 use std::process::Command;
 use std::thread::sleep;
 use std::time::Duration;
 
-use objc2_foundation::{NSBundle, NSString, NSUserNotification, NSUserNotificationCenter};
+use block2::RcBlock;
+use objc2::rc::Retained;
+use objc2::runtime::Bool;
+use objc2_foundation::{NSBundle, NSError, NSString};
+use objc2_user_notifications::{
+    UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
+    UNUserNotificationCenter,
+};
+
+/// Ask macOS for permission to notify; it prompts the first time only.
+pub fn authorize() {
+    if in_bundle() {
+        request(None);
+    }
+}
 
 /// Best effort: with notifications turned off, nothing shows and nothing fails.
 pub fn send(message: &str) {
-    if NSBundle::mainBundle().bundleIdentifier().is_some() {
-        let note = NSUserNotification::new();
-        note.setTitle(Some(&NSString::from_str("bytt")));
-        note.setInformativeText(Some(&NSString::from_str(message)));
-        NSUserNotificationCenter::defaultUserNotificationCenter().deliverNotification(&note);
-        // Delivery is handed to the notification daemon asynchronously; a process
-        // that exits right away can lose it.
-        sleep(Duration::from_millis(300));
+    if in_bundle() {
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&NSString::from_str("bytt"));
+        content.setBody(&NSString::from_str(message));
+        let id = format!("bytt-{}-{}", std::process::id(), unique());
+        let note = UNNotificationRequest::requestWithIdentifier_content_trigger(
+            &NSString::from_str(&id),
+            &content,
+            None,
+        );
+        request(Some(note));
+        // Delivery happens on another thread; a CLI that exits right away loses it.
+        sleep(Duration::from_millis(500));
         return;
     }
     let escaped = message.replace('\\', "\\\\").replace('"', "\\\"");
@@ -31,4 +49,30 @@ pub fn send(message: &str) {
     let _ = Command::new("/usr/bin/osascript")
         .args(["-e", &script])
         .output();
+}
+
+fn in_bundle() -> bool {
+    NSBundle::mainBundle().bundleIdentifier().is_some()
+}
+
+/// Request permission, then post `note` if there is one and it was granted.
+fn request(note: Option<Retained<UNNotificationRequest>>) {
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let post = center.clone();
+    let done = RcBlock::new(move |granted: Bool, _error: *mut NSError| {
+        if granted.as_bool()
+            && let Some(note) = &note
+        {
+            post.addNotificationRequest_withCompletionHandler(note, None);
+        }
+    });
+    let options = UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound;
+    center.requestAuthorizationWithOptions_completionHandler(options, &done);
+}
+
+/// Nanoseconds since the epoch, so two notifications never share an identifier.
+fn unique() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos())
 }

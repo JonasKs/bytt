@@ -8,8 +8,6 @@
 //! `AppKit` is reached through `objc2`, which marks much of it `unsafe`; this module is
 //! the one place bytt allows that.
 #![allow(unsafe_code)]
-// NSUserNotificationCenter: see `notify`.
-#![allow(deprecated)]
 
 use std::cell::RefCell;
 use std::fs;
@@ -17,6 +15,7 @@ use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant, SystemTime};
 
+use block2::DynBlock;
 use chrono::Local;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
@@ -26,11 +25,12 @@ use objc2_app_kit::{
     NSApplicationDelegate, NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu,
     NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
 };
-use objc2_foundation::{
-    NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer, NSUserNotification,
-    NSUserNotificationCenter, NSUserNotificationCenterDelegate,
-};
+use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer};
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
+use objc2_user_notifications::{
+    UNNotification, UNNotificationPresentationOptions, UNUserNotificationCenter,
+    UNUserNotificationCenterDelegate,
+};
 
 use crate::app::{App, Live, Snapshot};
 use crate::notify;
@@ -53,13 +53,6 @@ pub fn run(app: App) {
     let (jobs, done) = worker::spawn(app);
 
     let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
-    if let Some(button) = item.button(mtm) {
-        let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-            &NSString::from_str("arrow.left.arrow.right"),
-            Some(&NSString::from_str("bytt")),
-        );
-        button.setImage(image.as_deref());
-    }
     let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("bytt"));
     menu.setAutoenablesItems(false);
     item.setMenu(Some(&menu));
@@ -86,11 +79,10 @@ pub fn run(app: App) {
         },
     );
     // Both hold their delegate weakly; the handler lives as long as the app.
-    unsafe {
-        NSUserNotificationCenter::defaultUserNotificationCenter()
-            .setDelegate(Some(ProtocolObject::from_ref(&*handler)));
-    }
+    UNUserNotificationCenter::currentNotificationCenter()
+        .setDelegate(Some(ProtocolObject::from_ref(&*handler)));
     application.setDelegate(Some(ProtocolObject::from_ref(&*handler)));
+    notify::authorize();
     handler.send(Job::Refresh, Some("Reading usage"));
     first_launch_login_item();
 
@@ -176,16 +168,18 @@ define_class!(
 
     unsafe impl NSObjectProtocol for Handler {}
 
-    // A running app's own notifications are only shown when its delegate says so;
-    // without this, the test notification from the menu never appears.
-    unsafe impl NSUserNotificationCenterDelegate for Handler {
-        #[unsafe(method(userNotificationCenter:shouldPresentNotification:))]
-        fn should_present(
+    // While bytt is in front (its menu open), macOS shows its notifications only if
+    // the delegate asks for that; the test notification is sent from the menu.
+    unsafe impl UNUserNotificationCenterDelegate for Handler {
+        #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+        fn will_present(
             &self,
-            _center: &NSUserNotificationCenter,
-            _notification: &NSUserNotification,
-        ) -> bool {
-            true
+            _center: &UNUserNotificationCenter,
+            _notification: &UNNotification,
+            done: &DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+        ) {
+            done.call((UNNotificationPresentationOptions::Banner
+                | UNNotificationPresentationOptions::List,));
         }
     }
 
@@ -194,7 +188,7 @@ define_class!(
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn should_handle_reopen(&self, _application: &NSApplication, _visible: bool) -> bool {
             if self.ivars().borrow().config.menubar == MenuBar::Hidden {
-                self.configure(|c| c.menubar = MenuBar::Icon);
+                self.configure(|c| c.menubar = MenuBar::default());
                 self.tick_now();
             }
             true
@@ -468,20 +462,6 @@ impl Handler {
         let policy = config.policy();
 
         // What auto-switch is doing.
-        let auto = if config.auto {
-            let lines = if (policy.weekly_threshold - policy.threshold).abs() < f64::EPSILON {
-                format!("{:.0}%", policy.threshold)
-            } else {
-                format!(
-                    "{:.0}% 5-hour, {:.0}% weekly",
-                    policy.threshold, policy.weekly_threshold
-                )
-            };
-            format!("Auto-switch on · switches at {lines}")
-        } else {
-            "Auto-switch off".to_string()
-        };
-        menu.info(root, &auto);
         if let Some(snapshot) = &state.snapshot {
             let (now, next) = ui::outlook(snapshot, config, config.auto);
             menu.info(root, &join("Now", &now));
@@ -493,6 +473,7 @@ impl Handler {
         root.addItem(&NSMenuItem::separatorItem(mtm));
 
         // Accounts.
+        // The active account's highest usage, when the menu bar should show it.
         let mut button_title = String::new();
         match &state.snapshot {
             None => {
@@ -508,7 +489,7 @@ impl Handler {
                         && (config.menubar == MenuBar::Usage
                             || matches!(top.level, Level::Near | Level::Over))
                     {
-                        button_title = format!(" {:.0}%", top.pct);
+                        button_title = format!("{:.0}%", top.pct);
                     }
 
                     let account = menu.item(root, row.email, None, row.active);
@@ -599,13 +580,7 @@ impl Handler {
         root.addItem(&NSMenuItem::separatorItem(mtm));
 
         // Auto-switch and its settings.
-        settings_menu(
-            &mut menu,
-            root,
-            config,
-            state.snapshot.as_ref(),
-            state.checked.as_ref(),
-        );
+        settings_menu(&mut menu, root, config, state.snapshot.as_ref());
 
         root.addItem(&NSMenuItem::separatorItem(mtm));
         if let Some(on) = login_item() {
@@ -614,8 +589,8 @@ impl Handler {
         let shown = menu.submenu(root, "Menu Bar");
         for choice in MenuBar::ALL {
             let title = match choice {
-                MenuBar::Usage => "Icon and Usage",
-                MenuBar::Icon => "Icon Only, Usage When Near the Limit",
+                MenuBar::Usage => "Usage",
+                MenuBar::Icon => "Icon, Usage When Near the Limit",
                 MenuBar::Hidden => "Hidden…",
             };
             menu.item(
@@ -625,12 +600,31 @@ impl Handler {
                 config.menubar == choice,
             );
         }
+        if let Some((at, line)) = &state.checked {
+            menu.info(root, &format!("Last check {}: {line}", at.format("%H:%M")));
+        }
         menu.item(root, "Refresh", Some(Action::Refresh), false);
         menu.item(root, "Quit bytt", Some(Action::Quit), false);
 
         state.item.setVisible(config.menubar != MenuBar::Hidden);
         if let Some(button) = state.item.button(mtm) {
-            button.setTitle(&NSString::from_str(&button_title));
+            // "Usage" is the number alone; the icon stands in until there is one.
+            let icon = config.menubar == MenuBar::Icon || button_title.is_empty();
+            let image = icon
+                .then(|| {
+                    NSImage::imageWithSystemSymbolName_accessibilityDescription(
+                        &NSString::from_str("arrow.left.arrow.right"),
+                        Some(&NSString::from_str("bytt")),
+                    )
+                })
+                .flatten();
+            button.setImage(image.as_deref());
+            let title = if icon && !button_title.is_empty() {
+                format!(" {button_title}")
+            } else {
+                button_title
+            };
+            button.setTitle(&NSString::from_str(&title));
         }
     }
 }
@@ -642,19 +636,34 @@ fn settings_menu(
     root: &NSMenu,
     config: &Config,
     snapshot: Option<&Snapshot>,
-    checked: Option<&(chrono::DateTime<Local>, String)>,
 ) {
     let mtm = menu.mtm;
     let policy = config.policy();
+    let lines = if same(policy.threshold, policy.weekly_threshold) {
+        format!("{:.0}%", policy.threshold)
+    } else {
+        format!(
+            "{:.0}% 5-Hour, {:.0}% Weekly",
+            policy.threshold, policy.weekly_threshold
+        )
+    };
     menu.item(
         root,
-        "Auto-Switch",
+        &format!("Auto-Switch at {lines}"),
         Some(Action::Auto(!config.auto)),
         config.auto,
     );
+    // Each setting's title carries its value, so the list reads without opening it.
     let settings = menu.submenu(root, "Auto-Switch Settings");
     let percents = |current: f64| (10..=20).map(move |n| (f64::from(n) * 5.0, current));
-    let five = menu.submenu(&settings, "Switch When 5-Hour Usage Hits");
+    let minutes = |seconds: u64| match seconds {
+        0 => "No Wait".to_string(),
+        s => format!("{} min", s / 60),
+    };
+    let five = menu.submenu(
+        &settings,
+        &format!("Switch at 5-Hour Usage: {:.0}%", policy.threshold),
+    );
     for (pct, current) in percents(config.threshold) {
         menu.item(
             &five,
@@ -663,7 +672,10 @@ fn settings_menu(
             same(pct, current),
         );
     }
-    let weekly = menu.submenu(&settings, "Switch When Weekly Usage Hits");
+    let weekly = menu.submenu(
+        &settings,
+        &format!("Switch at Weekly Usage: {:.0}%", policy.weekly_threshold),
+    );
     for (pct, current) in percents(policy.weekly_threshold) {
         menu.item(
             &weekly,
@@ -681,7 +693,13 @@ fn settings_menu(
             on,
         );
     }
-    let under = menu.submenu(&settings, "Only Switch to Accounts Under");
+    let under = menu.submenu(
+        &settings,
+        &format!(
+            "Only Switch to Accounts Under: {:.0}%",
+            policy.threshold - policy.margin
+        ),
+    );
     for margin in (0..=8).map(|n| f64::from(n) * 5.0) {
         let five = policy.threshold - margin;
         let weekly = policy.weekly_threshold - margin;
@@ -697,7 +715,10 @@ fn settings_menu(
             same(margin, config.margin),
         );
     }
-    let cooldown = menu.submenu(&settings, "Wait Between Switches");
+    let cooldown = menu.submenu(
+        &settings,
+        &format!("Wait Between Switches: {}", minutes(config.cooldown)),
+    );
     for minutes in [0, 1, 2, 5, 10, 15, 30, 60] {
         let title = if minutes == 0 {
             "No Wait".to_string()
@@ -711,7 +732,10 @@ fn settings_menu(
             config.cooldown == minutes * 60,
         );
     }
-    let interval = menu.submenu(&settings, "Check Usage Every");
+    let interval = menu.submenu(
+        &settings,
+        &format!("Check Usage Every: {}", minutes(config.interval)),
+    );
     for minutes in [1, 2, 5, 10, 15, 30, 60] {
         menu.item(
             &interval,
@@ -734,12 +758,6 @@ fn settings_menu(
         false,
     );
     settings.addItem(&NSMenuItem::separatorItem(mtm));
-    if let Some((at, line)) = checked {
-        menu.info(
-            &settings,
-            &format!("Last check {}: {line}", at.format("%H:%M")),
-        );
-    }
     menu.item(
         &settings,
         "Open Config File",
@@ -787,11 +805,10 @@ impl Builder<'_> {
         item
     }
 
-    /// A line of text that does nothing when clicked.
+    /// A line of text that does nothing when clicked. Left enabled: `AppKit` greys out
+    /// disabled items, which made these hard to read.
     fn info(&mut self, menu: &NSMenu, title: &str) -> Retained<NSMenuItem> {
-        let item = self.item(menu, title, None, false);
-        item.setEnabled(false);
-        item
+        self.item(menu, title, None, false)
     }
 
     fn submenu(&mut self, menu: &NSMenu, title: &str) -> Retained<NSMenu> {

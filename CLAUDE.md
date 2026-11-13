@@ -23,7 +23,7 @@ just package                     # zipped Bytt.app like CI builds (CI also notar
 - `src/main.rs` — clap CLI and `bytt auto` loop. Opening Bytt.app sets `BYTT_APP` (Info.plist `LSEnvironment`) and runs the menu bar; bare `bytt` on a TTY opens the TUI, otherwise prints the list
 - `src/menubar.rs` — the menu bar app: `NSStatusItem` + an `NSMenu` rebuilt on change, alerts, login item, and the automatic switcher while `auto` is on. The only module allowed `unsafe` (objc2)
 - `src/worker.rs` — the thread the TUI and the menu bar send Keychain/network jobs to, one at a time
-- `src/notify.rs` — notifications: `NSUserNotification` inside the bundle (bytt's name and icon), `osascript` outside it
+- `src/notify.rs` — notifications: `UserNotifications` inside the bundle (bytt's name and icon), `osascript` outside it
 - `src/tui.rs` — ratatui terminal view: status at the top (auto on/off, what a check would decide, next pick), accounts with an action menu; → on the Auto-switch line opens a settings page edited with ←→ and saved to `config.toml`. Arrow keys / hjkl only, no letter commands. quitting waits for an in-flight switch
 - `src/app.rs` — `App`: add, collect usage, switch, one auto `check`. The ownership rules live in its module docs; the tests there run against a fake Keychain, fake Anthropic and a temp home
 - `src/usage.rs` — `Reading`, `Policy::standing` / `Policy::decide`: pure switching policy
@@ -93,10 +93,11 @@ re-open the tap PR.
 
 - **Testing a real switch moves every running Claude Code session**, including the one
   you are working in. Use `bytt auto --once --dry-run` to test decisions.
-- **Notifications need the bundle.** `NSUserNotification` only works with a bundle
-  identifier, and a running app's own notifications only show because `menubar.rs` is
-  the center's delegate (`shouldPresentNotification` → true). `bytt notify` (hidden)
-  sends a test one.
+- **Notifications need the bundle.** `UserNotifications` needs a bundle identifier and
+  permission, asked for at app launch and before each send. The deprecated
+  `NSUserNotification` never asks and current macOS silently drops it. While bytt is in
+  front (menu open) a banner only shows because `menubar.rs` is the center's delegate
+  (`willPresentNotification` → banner). `bytt notify` (hidden) sends a test one.
 - **Hidden menu bar icon** comes back through `applicationShouldHandleReopen`: `open`
   on the running app sends a reopen event to it rather than starting a second copy.
 - **Open at Login** appears only when run from /Applications (`just install`). Before

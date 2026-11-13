@@ -5,8 +5,7 @@ by hand or automatically before the one you're on hits its usage limit.
 
 Made for me, by agents. Feel free to use.
 
-- A small ⇆ in the menu bar, with the active account's usage once it nears its limit.
-  Open it for every account's 5-hour and weekly usage; click one to switch. Running Claude Code sessions follow within
+- The menu bar shows the active account's usage, e.g. `20%`. Open it for every account's 5-hour and weekly usage; click one to switch. Running Claude Code sessions follow within
   about 30 seconds; no restart, no `/login`.
 - Turn on Auto-Switch and bytt moves you to the account with the most room left when
   the active one reaches 90%.
@@ -20,8 +19,8 @@ Apple Silicon Macs, macOS 14 or later.
 brew install --cask jonasks/tap/bytt
 ```
 
-Open bytt from Applications once. It lives in the menu bar (⇆) and opens at login from
-then on.
+Open bytt from Applications once. It lives in the menu bar, showing your usage, and opens
+at login from then on.
 
 ## Add your accounts
 
@@ -32,7 +31,7 @@ Account…** again. Don't `/logout` first: that revokes the login bytt just save
 ## The menu
 
 ```
-⇆ 11%
+20%
 ├─ Auto-switch on · switches at 90%
 ├─ Now: on anna@example.com · 5h 83%, switches at 90%
 ├─ Next up: bob@example.com · 7d 9%
@@ -44,7 +43,7 @@ Account…** again. Don't `/logout` first: that revokes the login bytt just save
 ├─ Auto-Switch                         on/off
 ├─ Auto-Switch Settings               ▸
 ├─ Open at Login
-├─ Menu Bar                          ▸  icon and usage, icon only, hidden
+├─ Menu Bar                          ▸  usage, icon, hidden
 ├─ Refresh
 └─ Quit bytt
 ```
@@ -76,8 +75,9 @@ An account's submenu can leave it out of automatic switching.
 
 ## Keep the menu bar tidy
 
-**Menu Bar** chooses what bytt shows up there: the icon and usage, the icon only (the
-default, with usage added when the active account nears its switch point), or nothing.
+**Menu Bar** chooses what bytt shows up there: the active account's usage (the
+default), a small ⇆ icon that adds the usage only when the active account nears its
+switch point, or nothing.
 Hidden, bytt keeps running and switching; open Bytt from Spotlight or Applications to
 bring the icon back.
 
@@ -110,7 +110,7 @@ margin = 10              # only switch to accounts at least this far below those
 interval = 600           # seconds between checks
 cooldown = 300           # seconds to wait between switches
 notify = true            # macOS notification on switch
-menubar = "icon"         # "usage", "icon" or "hidden"
+menubar = "usage"        # "usage", "icon" or "hidden"
 ```
 
 ## When a login dies

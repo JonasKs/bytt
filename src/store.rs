@@ -232,10 +232,10 @@ pub struct Config {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MenuBar {
-    /// The icon and the active account's usage.
-    Usage,
-    /// The icon; usage only when the active account nears its switch point.
+    /// The active account's usage, as a number.
     #[default]
+    Usage,
+    /// An icon; usage next to it only when the active account nears its switch point.
     Icon,
     /// Nothing. Opening the app again shows the icon.
     Hidden,
@@ -254,8 +254,8 @@ impl MenuBar {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Usage => "Icon and usage",
-            Self::Icon => "Icon only",
+            Self::Usage => "Usage",
+            Self::Icon => "Icon, usage when near",
             Self::Hidden => "Hidden",
         }
     }
@@ -272,7 +272,7 @@ impl Default for Config {
             interval: 600,
             cooldown: 300,
             notify: true,
-            menubar: MenuBar::Icon,
+            menubar: MenuBar::Usage,
         }
     }
 }
@@ -320,8 +320,8 @@ cooldown = {cooldown}
 # Show a macOS notification when bytt switches account.
 notify = {notify}
 
-# The menu bar: "usage" (icon and usage), "icon" (usage only when near the switch
-# point) or "hidden" (open Bytt again to show it).
+# The menu bar: "usage" (the active account's usage), "icon" (an icon, with usage
+# when near the switch point) or "hidden" (open Bytt again to show it).
 menubar = "{menubar}"
 "#,
             menubar = self.menubar.key(),

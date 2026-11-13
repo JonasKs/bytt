@@ -494,7 +494,7 @@ impl Screen {
                 );
                 self.note = Some(Note::Info(
                     "Sent a test notification. Nothing showed up? Allow notifications for \
-                     Script Editor in System Settings → Notifications."
+                     bytt in System Settings → Notifications."
                         .into(),
                 ));
                 return;
@@ -912,7 +912,7 @@ impl Screen {
                     "A macOS notification each time bytt switches account. ⏎ sends a test one."
                 }
                 Setting::MenuBar => {
-                    "Icon only shows usage when the active account nears its switch point. Hidden: open Bytt again to show it."
+                    "What the menu bar shows: the active account's usage, or an icon with usage only when near the switch point. Hidden: open Bytt again to show it."
                 }
             },
             None => "",
