@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/JonasKs/bytt/compare/v0.3.0...v0.3.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* info lines in the menu no longer highlight on hover ([1706c82](https://github.com/JonasKs/bytt/commit/1706c820e0319314a21e2fd973c60167da2037b2))
+
 ## [0.3.0](https://github.com/JonasKs/bytt/compare/v0.2.0...v0.3.0) (2026-11-13)
 
 
