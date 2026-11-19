@@ -19,7 +19,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::app::{App, Live, Snapshot};
-use crate::store::{AccountId, Config, MenuBar, Store};
+use crate::store::{AccountId, Config, Icon, MenuBar, Store};
 use crate::ui::{self, Gauge, Level, Row};
 use crate::usage::Policy;
 use crate::worker::{self, Finished, Job, Note, Switcher};
@@ -62,6 +62,7 @@ enum Setting {
     Interval,
     Notify,
     MenuBar,
+    Icon,
 }
 
 /// The actions under an account, opened with ⏎ or →.
@@ -249,6 +250,7 @@ impl Screen {
                 Setting::Interval,
                 Setting::Notify,
                 Setting::MenuBar,
+                Setting::Icon,
             ]
             .map(Item::Setting),
         );
@@ -510,6 +512,16 @@ impl Screen {
                     _ => at.saturating_sub(1),
                 };
                 config.menubar = all[next];
+            }
+            Setting::Icon => {
+                let all = Icon::ALL;
+                let at = all.iter().position(|i| *i == config.icon).unwrap_or(0);
+                let next = match step {
+                    0 => (at + 1) % all.len(),
+                    1 => std::cmp::min(at + 1, all.len() - 1),
+                    _ => at.saturating_sub(1),
+                };
+                config.icon = all[next];
             }
         }
         if *config != before
@@ -853,6 +865,11 @@ impl Screen {
                 config.menubar.label().to_string(),
                 Style::new(),
             ),
+            Setting::Icon => (
+                "Menu bar icon".into(),
+                config.icon.label().to_string(),
+                Style::new(),
+            ),
         };
         let here = self.cursor.as_ref() == Some(item);
         let value = if here {
@@ -913,6 +930,9 @@ impl Screen {
                 }
                 Setting::MenuBar => {
                     "What the menu bar shows: the active account's usage, or an icon with usage only when near the switch point. Hidden: open Bytt again to show it."
+                }
+                Setting::Icon => {
+                    "The mark next to the usage in the menu bar. The menu bar app's Menu Bar menu previews each one."
                 }
             },
             None => "",

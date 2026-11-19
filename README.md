@@ -112,6 +112,7 @@ interval = 600           # seconds between checks
 cooldown = 300           # seconds to wait between switches
 notify = true            # macOS notification on switch
 menubar = "usage"        # "usage", "icon" or "hidden"
+icon = "ring"            # "ring", "badge", "arrows", "circle", "cycle", "gauge" or "none"
 ```
 
 ## When a login dies

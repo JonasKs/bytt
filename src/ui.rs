@@ -190,10 +190,17 @@ pub struct Gauge {
     pub level: Level,
     pub resets_at: Option<DateTime<Utc>>,
     pub reset: Option<String>,
+    /// How far through the window `now` is, 0 to 1: usage below it is under pace.
+    pub elapsed: Option<f64>,
 }
 
 impl Gauge {
     fn new(label: &str, window: &Window, line: f64, now: DateTime<Utc>) -> Self {
+        let length = if label == "5h" {
+            chrono::TimeDelta::hours(5)
+        } else {
+            chrono::TimeDelta::days(7)
+        };
         let pct = window.pct_at(now);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let filled = (pct / 10.0).round().clamp(0.0, 10.0) as usize;
@@ -208,6 +215,11 @@ impl Gauge {
             .resets_at
             .filter(|reset| *reset > now)
             .map(|reset| countdown(reset, now));
+        #[allow(clippy::cast_precision_loss)]
+        let elapsed = window.resets_at.filter(|reset| *reset > now).map(|reset| {
+            let left = (reset - now).num_seconds() as f64 / length.num_seconds() as f64;
+            (1.0 - left).clamp(0.0, 1.0)
+        });
         Self {
             label: label.to_string(),
             pct,
@@ -215,6 +227,7 @@ impl Gauge {
             level,
             resets_at: window.resets_at,
             reset,
+            elapsed,
         }
     }
 
@@ -356,6 +369,23 @@ pub fn table(snapshot: &Snapshot, policy: &Policy) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn elapsed_is_how_far_through_the_window() {
+        let now = Utc::now();
+        let window = |hours| Window {
+            pct: 40.0,
+            resets_at: Some(now + TimeDelta::hours(hours)),
+        };
+        let elapsed = |label, hours| {
+            Gauge::new(label, &window(hours), 90.0, now)
+                .elapsed
+                .unwrap()
+        };
+        assert!((elapsed("7d", 42) - 0.75).abs() < 1e-6);
+        assert!((elapsed("5h", 4) - 0.2).abs() < 1e-6);
+        assert_eq!(Gauge::new("7d", &window(-1), 90.0, now).elapsed, None);
+    }
 
     #[test]
     fn countdowns_pick_two_units() {

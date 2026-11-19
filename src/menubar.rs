@@ -10,6 +10,7 @@
 #![allow(unsafe_code)]
 
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::fs;
 use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender};
@@ -24,10 +25,10 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApplication, NSApplicationActivationPolicy,
-    NSApplicationDelegate, NSAttributedStringNSStringDrawing, NSColor, NSControlStateValueOff,
-    NSControlStateValueOn, NSFont, NSFontAttributeName, NSFontWeightBold, NSFontWeightRegular,
-    NSForegroundColorAttributeName, NSImage, NSImageSymbolConfiguration, NSMenu, NSMenuItem,
-    NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSApplicationDelegate, NSAttributedStringNSStringDrawing, NSBezierPath, NSColor,
+    NSControlStateValueOff, NSControlStateValueOn, NSFont, NSFontAttributeName, NSFontWeightBold,
+    NSFontWeightRegular, NSForegroundColorAttributeName, NSImage, NSImageSymbolConfiguration,
+    NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{
     NSArray, NSAttributedString, NSDictionary, NSMutableAttributedString, NSPoint, NSRect,
@@ -41,7 +42,7 @@ use objc2_user_notifications::{
 
 use crate::app::{App, Live, Snapshot};
 use crate::notify;
-use crate::store::{AccountId, Config, MenuBar, Store};
+use crate::store::{AccountId, Config, Icon, MenuBar, Store};
 use crate::ui::{self, Level};
 use crate::worker::{self, Finished, Job, Note};
 
@@ -127,6 +128,7 @@ enum Action {
     OpenConfig,
     LoginItem(bool),
     MenuBar(MenuBar),
+    Icon(Icon),
     Refresh,
     Quit,
 }
@@ -378,6 +380,7 @@ impl Handler {
                 }
             }
             Action::MenuBar(shown) => self.configure(|c| c.menubar = shown),
+            Action::Icon(icon) => self.configure(|c| c.icon = icon),
             Action::Refresh => self.send(Job::Refresh, Some("Reading usage")),
             Action::Quit => NSApplication::sharedApplication(mtm).terminate(None),
         }
@@ -482,6 +485,9 @@ impl Handler {
         // Accounts.
         // The active account's highest usage, when the menu bar should show it.
         let mut button_title = String::new();
+        // The active account's fullest window, for the ring and the tooltip.
+        let mut fullest: Option<Ring> = None;
+        let mut tooltip = String::from("bytt");
         match &state.snapshot {
             None => {
                 menu.info(root, "Reading usage…");
@@ -491,6 +497,23 @@ impl Handler {
                     let gauges = row
                         .usage
                         .map_or_default(|r| ui::gauges(r, &policy, snapshot.now));
+                    if row.active
+                        && let Some(top) = gauges.iter().max_by(|a, b| a.pct.total_cmp(&b.pct))
+                    {
+                        fullest = Some(Ring {
+                            pct: top.pct,
+                            elapsed: top.elapsed,
+                            over: top.level == Level::Over,
+                        });
+                        tooltip = format!("{}: {} {:.0}%", row.email, top.label, top.pct);
+                        if let (Some(reset), Some(at)) = (&top.reset, top.resets_at) {
+                            let _ = write!(
+                                tooltip,
+                                ", resets in {reset} ({})",
+                                at.with_timezone(&Local).format("%a %H:%M")
+                            );
+                        }
+                    }
                     if row.active
                         && let Some(top) = gauges.iter().max_by(|a, b| a.pct.total_cmp(&b.pct))
                         && (config.menubar == MenuBar::Usage
@@ -599,6 +622,36 @@ impl Handler {
                 config.menubar == choice,
             );
         }
+        // Each icon drawn as the menu bar would show it, so choosing is seeing.
+        shown.addItem(&NSMenuItem::separatorItem(mtm));
+        menu.info(&shown, "Icon");
+        let usage = config.menubar == MenuBar::Usage;
+        let sample = if !usage {
+            ""
+        } else if button_title.is_empty() {
+            "57%"
+        } else {
+            &button_title
+        };
+        let height = NSFont::menuFontOfSize(0.0).pointSize() + 6.0;
+        for icon in Icon::ALL {
+            // Without a number there is nothing to show "Number Only" with.
+            if icon == Icon::None && !usage {
+                continue;
+            }
+            let item = menu.item(
+                &shown,
+                icon.title(),
+                Some(Action::Icon(icon)),
+                config.icon == icon,
+            );
+            let ring = fullest.unwrap_or(Ring {
+                pct: 57.0,
+                elapsed: Some(0.7),
+                over: false,
+            });
+            item.setImage(bar_image(icon, sample, Some(ring), height).as_deref());
+        }
         if let Some((at, line)) = &state.checked {
             menu.info(root, &format!("Last check {}: {line}", at.format("%H:%M")));
         }
@@ -607,24 +660,11 @@ impl Handler {
 
         state.item.setVisible(config.menubar != MenuBar::Hidden);
         if let Some(button) = state.item.button(mtm) {
-            // "Usage" is the number with a small orange badge; the plain icon stands in
-            // until there is a number.
-            if config.menubar == MenuBar::Usage && !button_title.is_empty() {
-                button.setImage(Some(&usage_image(&button_title)));
-                button.setTitle(&NSString::from_str(""));
-            } else {
-                let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-                    &NSString::from_str("arrow.left.arrow.right"),
-                    Some(&NSString::from_str("bytt")),
-                );
-                button.setImage(image.as_deref());
-                let title = if button_title.is_empty() {
-                    button_title
-                } else {
-                    format!(" {button_title}")
-                };
-                button.setTitle(&NSString::from_str(&title));
-            }
+            // The icon stands in until there is a number.
+            let height = NSStatusBar::systemStatusBar().thickness();
+            button.setImage(bar_image(config.icon, &button_title, fullest, height).as_deref());
+            button.setTitle(&NSString::from_str(""));
+            button.setToolTip(Some(&NSString::from_str(&tooltip)));
         }
     }
 }
@@ -632,50 +672,210 @@ impl Handler {
 /// Claude's orange, for the badge.
 const ORANGE: (f64, f64, f64) = (217.0 / 255.0, 119.0 / 255.0, 87.0 / 255.0);
 
-/// `text` (the usage) with small orange arrows tucked over its top-right corner, the
-/// way Teams badges its icon. Drawn at display time, so the text follows the menu
-/// bar's light or dark appearance.
-fn usage_image(text: &str) -> Retained<NSImage> {
-    let string = attributed(
-        &[(text, &NSColor::labelColor())],
-        &NSFont::menuBarFontOfSize(0.0),
-    );
-    let orange = NSColor::colorWithSRGBRed_green_blue_alpha(ORANGE.0, ORANGE.1, ORANGE.2, 1.0);
-    let config = NSImageSymbolConfiguration::configurationWithPointSize_weight(8.0, unsafe {
-        NSFontWeightBold
-    })
-    .configurationByApplyingConfiguration(
-        &NSImageSymbolConfiguration::configurationWithPaletteColors(&NSArray::from_slice(&[
-            &*orange,
-        ])),
-    );
-    let badge = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-        &NSString::from_str("arrow.left.arrow.right"),
-        None,
-    )
-    .and_then(|image| image.imageWithSymbolConfiguration(&config));
+/// The SF Symbol behind `icon`.
+fn symbol_name(icon: Icon) -> &'static str {
+    match icon {
+        Icon::Ring | Icon::Badge | Icon::Arrows | Icon::None => "arrow.left.arrow.right",
+        Icon::Circle => "arrow.left.arrow.right.circle.fill",
+        Icon::Cycle => "arrow.triangle.2.circlepath",
+        Icon::Gauge => "gauge.with.dots.needle.67percent",
+    }
+}
 
+fn symbol(icon: Icon, config: &NSImageSymbolConfiguration) -> Option<Retained<NSImage>> {
+    NSImage::imageWithSystemSymbolName_accessibilityDescription(
+        &NSString::from_str(symbol_name(icon)),
+        Some(&NSString::from_str("bytt")),
+    )
+    .and_then(|image| image.imageWithSymbolConfiguration(config))
+}
+
+/// What the menu bar shows for `icon` with `text` (the usage, or empty for the icon
+/// alone), `height` points tall. Drawn at display time, so it follows the menu bar's
+/// light or dark appearance.
+/// `ring` is the active account's fullest window; without one the ring is empty.
+fn bar_image(icon: Icon, text: &str, ring: Option<Ring>, height: f64) -> Option<Retained<NSImage>> {
+    let font = NSFont::menuBarFontOfSize(0.0);
+    let orange = NSColor::colorWithSRGBRed_green_blue_alpha(ORANGE.0, ORANGE.1, ORANGE.2, 1.0);
+    let paint = |color: &NSColor| {
+        NSImageSymbolConfiguration::configurationWithPaletteColors(&NSArray::from_slice(&[color]))
+    };
+    let regular =
+        NSImageSymbolConfiguration::configurationWithPointSize_weight(font.pointSize(), unsafe {
+            NSFontWeightRegular
+        });
+
+    if icon == Icon::Ring {
+        return Some(ring_image(text, ring, height));
+    }
+    if text.is_empty() {
+        // The icon alone: a template, so AppKit tints it, except the orange badge.
+        if icon == Icon::Badge {
+            let image = symbol(
+                icon,
+                &regular.configurationByApplyingConfiguration(&paint(&orange)),
+            )?;
+            image.setTemplate(false);
+            return Some(image);
+        }
+        let image = symbol(icon, &regular)?;
+        image.setTemplate(true);
+        return Some(image);
+    }
+
+    let string = attributed(&[(text, &NSColor::labelColor())], &font);
     let text_size = string.size();
-    let badge_size = badge.as_ref().map_or(NSSize::new(0.0, 0.0), |b| b.size());
-    let height = NSStatusBar::systemStatusBar().thickness();
-    // The badge overlaps the text by a little less than half its width.
-    let overlap = badge_size.width * 0.4;
-    let size = NSSize::new(text_size.width + badge_size.width - overlap, height);
+    let text_y = ((height - text_size.height) / 2.0 - 0.5).max(0.0);
+    let (size, draw) = match icon {
+        Icon::Badge => {
+            // Small orange arrows tucked over the number's top-right corner, the way
+            // Teams badges its icon.
+            let small =
+                NSImageSymbolConfiguration::configurationWithPointSize_weight(8.0, unsafe {
+                    NSFontWeightBold
+                })
+                .configurationByApplyingConfiguration(&paint(&orange));
+            let badge = symbol(icon, &small);
+            let badge_size = badge.as_ref().map_or(NSSize::new(0.0, 0.0), |b| b.size());
+            // The badge overlaps the text by a little less than half its width.
+            let overlap = badge_size.width * 0.4;
+            let size = NSSize::new(text_size.width + badge_size.width - overlap, height);
+            let draw = RcBlock::new(move |_rect: NSRect| -> Bool {
+                string.drawAtPoint(NSPoint::new(0.0, (text_y - 1.0).max(0.0)));
+                if let Some(badge) = &badge {
+                    badge.drawInRect(NSRect::new(
+                        NSPoint::new(text_size.width - overlap, height - badge_size.height - 2.0),
+                        badge_size,
+                    ));
+                }
+                Bool::YES
+            });
+            (size, draw)
+        }
+        Icon::None => {
+            let size = NSSize::new(text_size.width, height);
+            let draw = RcBlock::new(move |_rect: NSRect| -> Bool {
+                string.drawAtPoint(NSPoint::new(0.0, text_y));
+                Bool::YES
+            });
+            (size, draw)
+        }
+        Icon::Ring | Icon::Arrows | Icon::Circle | Icon::Cycle | Icon::Gauge => {
+            // The icon, a gap, the number; both in the label color.
+            let mark = symbol(
+                icon,
+                &regular.configurationByApplyingConfiguration(&paint(&NSColor::labelColor())),
+            );
+            let mark_size = mark.as_ref().map_or(NSSize::new(0.0, 0.0), |m| m.size());
+            let gap = 3.0;
+            let size = NSSize::new(mark_size.width + gap + text_size.width, height);
+            let draw = RcBlock::new(move |_rect: NSRect| -> Bool {
+                if let Some(mark) = &mark {
+                    mark.drawInRect(NSRect::new(
+                        NSPoint::new(0.0, ((height - mark_size.height) / 2.0).max(0.0)),
+                        mark_size,
+                    ));
+                }
+                string.drawAtPoint(NSPoint::new(mark_size.width + gap, text_y));
+                Bool::YES
+            });
+            (size, draw)
+        }
+    };
+    let image = NSImage::imageWithSize_flipped_drawingHandler(size, false, &draw);
+    image.setTemplate(false);
+    image.setAccessibilityDescription(Some(&NSString::from_str(&format!("bytt {text}"))));
+    Some(image)
+}
+
+/// A window drawn as a ring: how full, and how far through it is.
+#[derive(Clone, Copy)]
+struct Ring {
+    pct: f64,
+    elapsed: Option<f64>,
+    over: bool,
+}
+
+/// A circle that fills clockwise from the top in Claude's orange (red past the switch
+/// point), a needle at how far through the window it is, then `text`. Usage short of
+/// the needle is under pace: there is room to spend before the reset.
+fn ring_image(text: &str, ring: Option<Ring>, height: f64) -> Retained<NSImage> {
+    let font = NSFont::menuBarFontOfSize(0.0);
+    let string = attributed(&[(text, &NSColor::labelColor())], &font);
+    let text_size = if text.is_empty() {
+        NSSize::new(0.0, 0.0)
+    } else {
+        string.size()
+    };
+    let diameter = (height - 8.0).clamp(10.0, 16.0);
+    let gap = if text.is_empty() { 0.0 } else { 4.0 };
+    let has_text = !text.is_empty();
+    // Room either side so the outline's stroke isn't clipped.
+    let pad = 1.0;
+    let size = NSSize::new(pad * 2.0 + diameter + gap + text_size.width, height);
     let draw = RcBlock::new(move |_rect: NSRect| -> Bool {
-        let text_y = ((height - text_size.height) / 2.0 - 1.5).max(0.0);
-        string.drawAtPoint(NSPoint::new(0.0, text_y));
-        if let Some(badge) = &badge {
-            badge.drawInRect(NSRect::new(
-                NSPoint::new(text_size.width - overlap, height - badge_size.height - 2.0),
-                badge_size,
-            ));
+        let center = NSPoint::new(pad + diameter / 2.0, height / 2.0);
+        let radius = diameter / 2.0;
+        let at = |degrees: f64, r: f64| {
+            let radians = degrees.to_radians();
+            NSPoint::new(center.x + r * radians.cos(), center.y + r * radians.sin())
+        };
+        if let Some(ring) = ring {
+            let fill = if ring.over {
+                NSColor::systemRedColor()
+            } else {
+                NSColor::colorWithSRGBRed_green_blue_alpha(ORANGE.0, ORANGE.1, ORANGE.2, 1.0)
+            };
+            fill.setFill();
+            let pct = ring.pct.clamp(0.0, 100.0);
+            if pct >= 99.5 {
+                NSBezierPath::bezierPathWithOvalInRect(circle(center, radius)).fill();
+            } else if pct > 0.5 {
+                let wedge = NSBezierPath::bezierPath();
+                wedge.moveToPoint(center);
+                wedge.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise(
+                    center,
+                    radius,
+                    90.0,
+                    90.0 - 360.0 * pct / 100.0,
+                    true,
+                );
+                wedge.closePath();
+                wedge.fill();
+            }
+        }
+        NSColor::labelColor().setStroke();
+        let outline = NSBezierPath::bezierPathWithOvalInRect(circle(center, radius - 0.6));
+        outline.setLineWidth(1.2);
+        outline.stroke();
+        if let Some(elapsed) = ring.and_then(|r| r.elapsed) {
+            let needle = NSBezierPath::bezierPath();
+            needle.moveToPoint(center);
+            needle.lineToPoint(at(90.0 - 360.0 * elapsed, radius - 0.6));
+            needle.setLineWidth(1.4);
+            needle.stroke();
+        }
+        if has_text {
+            let text_y = ((height - text_size.height) / 2.0 - 0.5).max(0.0);
+            string.drawAtPoint(NSPoint::new(pad + diameter + gap, text_y));
         }
         Bool::YES
     });
     let image = NSImage::imageWithSize_flipped_drawingHandler(size, false, &draw);
     image.setTemplate(false);
-    image.setAccessibilityDescription(Some(&NSString::from_str(&format!("bytt {text}"))));
+    let what = ring.map_or_else(
+        || "bytt".to_string(),
+        |r| format!("bytt, {:.0}% used", r.pct),
+    );
+    image.setAccessibilityDescription(Some(&NSString::from_str(&what)));
     image
+}
+
+fn circle(center: NSPoint, radius: f64) -> NSRect {
+    NSRect::new(
+        NSPoint::new(center.x - radius, center.y - radius),
+        NSSize::new(radius * 2.0, radius * 2.0),
+    )
 }
 
 /// Auto-Switch on/off and its settings submenu.
@@ -890,7 +1090,11 @@ impl Builder<'_> {
         };
         let filled = "━".repeat(gauge.filled);
         let empty = "━".repeat(10 - gauge.filled);
-        let text = format!("  {}  {}", gauge.figure(), gauge.label);
+        let reset = gauge
+            .reset
+            .as_ref()
+            .map_or_default(|reset| format!(" · resets in {reset}"));
+        let text = format!("  {}  {}{reset}", gauge.figure(), gauge.label);
         self.styled(
             menu,
             &[

@@ -226,6 +226,7 @@ pub struct Config {
     pub cooldown: u64,
     pub notify: bool,
     pub menubar: MenuBar,
+    pub icon: Icon,
 }
 
 /// What the menu bar app shows in the menu bar.
@@ -261,6 +262,78 @@ impl MenuBar {
     }
 }
 
+/// The mark the menu bar shows with (or instead of) the usage number.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Icon {
+    /// A circle that fills with usage, with a needle at how far through the window
+    /// it is. Usage left of the needle is under pace.
+    #[default]
+    Ring,
+    /// Small orange arrows over the number's corner.
+    Badge,
+    /// ⇄ before the number.
+    Arrows,
+    /// ⇄ in a filled circle.
+    Circle,
+    /// Two arrows chasing each other round.
+    Cycle,
+    /// A gauge.
+    Gauge,
+    /// The number alone. The icon-only menu bar shows the arrows.
+    None,
+}
+
+impl Icon {
+    pub const ALL: [Self; 7] = [
+        Self::Ring,
+        Self::Badge,
+        Self::Arrows,
+        Self::Circle,
+        Self::Cycle,
+        Self::Gauge,
+        Self::None,
+    ];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Ring => "ring",
+            Self::Badge => "badge",
+            Self::Arrows => "arrows",
+            Self::Circle => "circle",
+            Self::Cycle => "cycle",
+            Self::Gauge => "gauge",
+            Self::None => "none",
+        }
+    }
+
+    /// As the menu titles it.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Ring => "Filling Ring",
+            Self::Badge => "Orange Badge",
+            Self::Arrows => "Arrows",
+            Self::Circle => "Arrows in a Circle",
+            Self::Cycle => "Circling Arrows",
+            Self::Gauge => "Gauge",
+            Self::None => "Number Only",
+        }
+    }
+
+    /// As the TUI shows it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ring => "filling ring",
+            Self::Badge => "orange badge",
+            Self::Arrows => "arrows",
+            Self::Circle => "arrows in a circle",
+            Self::Cycle => "circling arrows",
+            Self::Gauge => "gauge",
+            Self::None => "number only",
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -273,6 +346,7 @@ impl Default for Config {
             cooldown: 300,
             notify: true,
             menubar: MenuBar::Usage,
+            icon: Icon::Ring,
         }
     }
 }
@@ -323,8 +397,14 @@ notify = {notify}
 # The menu bar: "usage" (the active account's usage), "icon" (an icon, with usage
 # when near the switch point) or "hidden" (open Bytt again to show it).
 menubar = "{menubar}"
+
+# The icon: "ring" (a circle that fills with usage, a needle at how far through
+# the window it is), "badge" (small orange arrows on the number), "arrows",
+# "circle", "cycle", "gauge" or "none" (the number alone).
+icon = "{icon}"
 "#,
             menubar = self.menubar.key(),
+            icon = self.icon.key(),
             auto = self.auto,
             threshold = self.threshold,
             margin = self.margin,
@@ -538,6 +618,7 @@ mod tests {
             cooldown: 0,
             notify: false,
             menubar: MenuBar::Hidden,
+            icon: Icon::Gauge,
         };
         assert_eq!(Config::parse(&edited.render()).unwrap(), edited);
         assert_eq!(Config::parse("").unwrap(), Config::default());
