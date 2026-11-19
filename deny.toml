@@ -3,7 +3,11 @@
 targets = ["aarch64-apple-darwin"]
 
 [advisories]
-ignore = []
+ignore = [
+  # chrono is unmaintained (no vulnerability). bytt only formats and subtracts
+  # timestamps with it; replace it when a successor settles.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, no known vulnerability" },
+]
 version = 2
 yanked = "warn"
 
