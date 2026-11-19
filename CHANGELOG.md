@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JonasKs/bytt/compare/v0.4.0...v0.5.0) (2026-11-19)
+
+
+### Features
+
+* a ring that fills with usage, and a choice of menu bar icons ([44da9cf](https://github.com/JonasKs/bytt/commit/44da9cff70a8abd5c8af5f042caa54537607e362))
+
 ## [0.4.0](https://github.com/JonasKs/bytt/compare/v0.3.1...v0.4.0) (2026-11-13)
 
 
